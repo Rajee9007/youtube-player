@@ -18,6 +18,15 @@ import {
   SylTooltipDirective,
 } from '@seyyul/ui';
 
+export interface YTPlayerInstance {
+  playVideo(): void;
+  pauseVideo(): void;
+  mute(): void;
+  unMute(): void;
+  destroy?(): void;
+  getVideoData?(): { title?: string; author?: string; video_id?: string };
+}
+
 @Component({
   selector: 'app-multi-player-card',
   standalone: true,
@@ -34,7 +43,7 @@ import {
       <!-- Card Top Header -->
       <div sylCardHeader class="syl-card-header-bar">
         <div class="syl-card-title-group">
-          <span class="syl-player-number">#{{ index() + 1 }}</span>
+          <span class="syl-player-number">Player #{{ player().slotNumber }}</span>
           <span class="syl-card-video-id" [title]="player().youtubeVideoId">
             <code>{{ player().youtubeVideoId }}</code>
           </span>
@@ -290,7 +299,8 @@ export class MultiPlayerCardComponent implements OnDestroy {
   private readonly stateService = inject(MultiPlayerStateService);
   private readonly iframeMount = viewChild<ElementRef<HTMLDivElement>>('iframeMount');
 
-  private playerInstance: any = null;
+  private playerInstance: YTPlayerInstance | null = null;
+  private playRequestedOnReady = false;
 
   isInitialized(): boolean {
     const s = this.player().status;
@@ -357,20 +367,26 @@ export class MultiPlayerCardComponent implements OnDestroy {
 
           // Apply initial sound preference (Open with Muted option)
           if (p.isMuted) {
-            this.playerInstance.mute();
+            this.playerInstance?.mute();
             this.stateService.updatePlayerSound(p.id, true);
           } else {
-            this.playerInstance.unMute();
+            this.playerInstance?.unMute();
             this.stateService.updatePlayerSound(p.id, false);
           }
 
           // Read video title from API if available
           try {
-            const videoData = this.playerInstance.getVideoData?.();
+            const videoData = this.playerInstance?.getVideoData?.();
             if (videoData?.title) {
               this.stateService.updatePlayerTitle(p.id, videoData.title);
             }
           } catch {}
+
+          // Execute deferred user play action safely on ready
+          if (this.playRequestedOnReady) {
+            this.playRequestedOnReady = false;
+            this.ytService.playVideo(p.id);
+          }
         },
         onStateChange: (event: any) => {
           const state = event.data;
@@ -387,6 +403,7 @@ export class MultiPlayerCardComponent implements OnDestroy {
           }
         },
         onError: (err: any) => {
+          this.playRequestedOnReady = false;
           const code = err?.data;
           let message = 'Unable to play video';
           if (code === 100) {
@@ -398,6 +415,7 @@ export class MultiPlayerCardComponent implements OnDestroy {
         },
       });
     } catch {
+      this.playRequestedOnReady = false;
       this.stateService.updatePlayerStatus(
         p.id,
         'error',
@@ -408,10 +426,8 @@ export class MultiPlayerCardComponent implements OnDestroy {
 
   onPlay(): void {
     if (!this.playerInstance) {
-      this.initializePlayer().then(() => {
-        // Play triggered by user gesture
-        setTimeout(() => this.ytService.playVideo(this.player().id), 400);
-      });
+      this.playRequestedOnReady = true;
+      this.initializePlayer();
     } else {
       this.ytService.playVideo(this.player().id);
     }

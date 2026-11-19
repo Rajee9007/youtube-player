@@ -240,25 +240,25 @@ export class YouTubePlayerService {
     }
 
     // 1. YouTube Shorts: https://(www|m).youtube.com/shorts/VIDEO_ID
-    const shortsMatch = trimmed.match(/(?:youtube\.com\/shorts\/)([\w-]{11})/i);
+    const shortsMatch = trimmed.match(/(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/i);
     if (shortsMatch) {
       return shortsMatch[1];
     }
 
     // 2. Standard watch URL: youtube.com/watch?v=VIDEO_ID (supports m.youtube.com, query params before and after)
-    const watchMatch = trimmed.match(/(?:youtube\.com\/watch\?.*v=)([\w-]{11})/i);
+    const watchMatch = trimmed.match(/(?:youtube\.com\/watch\?(?:.*&)?v=)([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/i);
     if (watchMatch) {
       return watchMatch[1];
     }
 
     // 3. Short URLs: youtu.be/VIDEO_ID
-    const youtuBeMatch = trimmed.match(/(?:youtu\.be\/)([\w-]{11})/i);
+    const youtuBeMatch = trimmed.match(/(?:youtu\.be\/)([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/i);
     if (youtuBeMatch) {
       return youtuBeMatch[1];
     }
 
     // 4. Embed URLs: youtube.com/embed/VIDEO_ID or youtube.com/v/VIDEO_ID
-    const embedMatch = trimmed.match(/(?:youtube\.com\/(?:embed|v)\/)([\w-]{11})/i);
+    const embedMatch = trimmed.match(/(?:youtube\.com\/(?:embed|v)\/)([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/i);
     if (embedMatch) {
       return embedMatch[1];
     }

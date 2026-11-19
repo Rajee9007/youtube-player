@@ -1,4 +1,4 @@
-import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -153,6 +153,17 @@ interface SampleVideo {
               </syl-input>
             </div>
 
+            <div class="syl-add-slot-wrapper">
+              <syl-input
+                placeholder="Player # (e.g. 1)"
+                [clearable]="false"
+                [(ngModel)]="slotInput"
+                (keydown.enter)="onAddVideo()"
+              >
+                <span sylPrefix class="syl-input-slot-icon">Slot #</span>
+              </syl-input>
+            </div>
+
             <div class="syl-add-mute-option">
               <syl-switch [(ngModel)]="openWithMuted">
                 Open with Muted
@@ -300,6 +311,18 @@ interface SampleVideo {
         (confirm)="onConfirmClearAll()"
         (cancel)="confirmClearOpen.set(false)"
       />
+
+      <!-- Occupied Slot Replace Confirmation Dialog -->
+      <syl-confirm-dialog
+        [open]="confirmReplaceOpen()"
+        title="Player Slot Occupied"
+        [message]="replaceConfirmMessage()"
+        confirmText="Replace Existing Video"
+        cancelText="Cancel"
+        [danger]="true"
+        (confirm)="onConfirmReplace()"
+        (cancel)="onCancelReplace()"
+      />
     </div>
   `,
   styles: [`
@@ -393,15 +416,26 @@ interface SampleVideo {
       flex-direction: column;
     }
 
-    @media (min-width: 640px) {
+    @media (min-width: 768px) {
       .syl-add-form {
         flex-direction: row;
         align-items: center;
       }
 
       .syl-add-input-wrapper {
-        flex: 1;
+        flex: 2;
       }
+
+      .syl-add-slot-wrapper {
+        width: 12rem;
+      }
+    }
+
+    .syl-input-slot-icon {
+      font-size: 0.8125rem;
+      font-weight: 700;
+      color: var(--syl-accent, #e50914);
+      padding: 0 0.25rem;
     }
 
     .syl-add-mute-option {
@@ -532,14 +566,19 @@ interface SampleVideo {
     }
   `],
 })
-export class MultiVideoPlayerComponent {
+export class MultiVideoPlayerComponent implements OnInit {
   readonly state = inject(MultiPlayerStateService);
 
   urlInput = '';
+  slotInput = '1';
   openWithMuted = true;
   readonly errorMessage = signal<string | null>(null);
   readonly isAdding = signal<boolean>(false);
   readonly confirmClearOpen = signal<boolean>(false);
+  readonly confirmReplaceOpen = signal<boolean>(false);
+  readonly replaceConfirmMessage = signal<string>('');
+
+  private pendingReplacePayload: { url: string; slot: number; muted: boolean } | null = null;
 
   readonly sampleVideos: SampleVideo[] = [
     { label: 'Seyyul Kids — Thirukkural Stories', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
@@ -548,36 +587,84 @@ export class MultiVideoPlayerComponent {
     { label: 'Seyyul Toonz — Animation Short', url: 'https://www.youtube.com/shorts/kJQP7kiw5Fk' },
   ];
 
+  ngOnInit(): void {
+    this.slotInput = this.state.getNextAvailableSlot().toString();
+  }
+
   onAddVideo(): void {
-    const trimmed = this.urlInput.trim();
-    if (!trimmed) {
+    const trimmedUrl = this.urlInput.trim();
+    if (!trimmedUrl) {
       this.errorMessage.set('Please enter a YouTube video URL or ID.');
       return;
     }
 
-    this.isAdding.set(true);
-    const result = this.state.addPlayer(trimmed, this.openWithMuted);
+    const slotVal = this.state.validateSlotNumber(this.slotInput);
+    if (!slotVal.valid || slotVal.slotNumber === undefined) {
+      this.errorMessage.set(slotVal.error ?? 'Please enter a valid Player Number.');
+      return;
+    }
 
+    this.isAdding.set(true);
+    const result = this.state.addPlayer(trimmedUrl, slotVal.slotNumber, this.openWithMuted, false);
     this.isAdding.set(false);
+
+    if (result.occupied) {
+      this.pendingReplacePayload = {
+        url: trimmedUrl,
+        slot: slotVal.slotNumber,
+        muted: this.openWithMuted,
+      };
+      this.replaceConfirmMessage.set(
+        `Player ${slotVal.slotNumber} is already occupied. Do you want to replace the existing video?`
+      );
+      this.confirmReplaceOpen.set(true);
+      return;
+    }
+
     if (!result.success) {
       this.errorMessage.set(result.error ?? 'Failed to add video player.');
     } else {
       this.urlInput = '';
+      this.slotInput = this.state.getNextAvailableSlot().toString();
       this.errorMessage.set(null);
     }
   }
 
+  onConfirmReplace(): void {
+    if (!this.pendingReplacePayload) return;
+    const { url, slot, muted } = this.pendingReplacePayload;
+    const result = this.state.addPlayer(url, slot, muted, true);
+    this.confirmReplaceOpen.set(false);
+    this.pendingReplacePayload = null;
+
+    if (!result.success) {
+      this.errorMessage.set(result.error ?? 'Failed to replace video player.');
+    } else {
+      this.urlInput = '';
+      this.slotInput = this.state.getNextAvailableSlot().toString();
+      this.errorMessage.set(null);
+    }
+  }
+
+  onCancelReplace(): void {
+    this.confirmReplaceOpen.set(false);
+    this.pendingReplacePayload = null;
+  }
+
   onAddSample(url: string): void {
     this.urlInput = url;
+    this.slotInput = this.state.getNextAvailableSlot().toString();
     this.onAddVideo();
   }
 
   onRemovePlayer(id: string): void {
     this.state.removePlayer(id);
+    this.slotInput = this.state.getNextAvailableSlot().toString();
   }
 
   onConfirmClearAll(): void {
     this.state.clearAll();
+    this.slotInput = '1';
     this.confirmClearOpen.set(false);
   }
 }
