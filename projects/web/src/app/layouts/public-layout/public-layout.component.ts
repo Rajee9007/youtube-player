@@ -56,6 +56,7 @@ import {
         <div sylActions class="syl-nav-links">
           <a routerLink="/channels" class="syl-nav-item">Channels</a>
           <a routerLink="/playlists" class="syl-nav-item">Playlists</a>
+          <a routerLink="/multi-video-player" class="syl-nav-item">Multi-Player</a>
           <a routerLink="/design-system" class="syl-nav-item syl-nav-ds">Design System</a>
           <syl-theme-switcher />
           <a routerLink="/admin" class="syl-admin-portal-link" title="Admin Portal">
@@ -102,6 +103,7 @@ import {
               <li><a routerLink="/">Home Discovery</a></li>
               <li><a routerLink="/channels">All Channels</a></li>
               <li><a routerLink="/playlists">Curated Playlists</a></li>
+              <li><a routerLink="/multi-video-player">Multi Video Player</a></li>
               <li><a routerLink="/design-system">SYL Design System (10 Themes)</a></li>
               <li><a routerLink="/admin">Admin Management</a></li>
             </ul>

@@ -17,6 +17,9 @@ export class YouTubePlayerService {
   private isApiLoaded = false;
   private apiReadyPromise: Promise<void> | null = null;
 
+  // Multi-player instances registry keyed by unique card ID
+  private readonly activeInstances = new Map<string, any>();
+
   loadIFrameApi(): Promise<void> {
     if (!this.isBrowser) {
       return Promise.resolve();
@@ -98,16 +101,173 @@ export class YouTubePlayerService {
     });
   }
 
+  // --- MULTI-PLAYER INSTANCE REGISTRY ---
+
+  registerPlayerInstance(id: string, player: any): void {
+    if (!id || !player) return;
+    this.activeInstances.set(id, player);
+  }
+
+  getPlayerInstance(id: string): any {
+    return this.activeInstances.get(id) ?? null;
+  }
+
+  unregisterPlayerInstance(id: string): void {
+    const player = this.activeInstances.get(id);
+    if (player && typeof player.destroy === 'function') {
+      try {
+        player.destroy();
+      } catch (err) {
+        console.warn(`Error destroying player ${id}:`, err);
+      }
+    }
+    this.activeInstances.delete(id);
+  }
+
+  playVideo(id: string): void {
+    const player = this.activeInstances.get(id);
+    if (player && typeof player.playVideo === 'function') {
+      try {
+        player.playVideo();
+      } catch (err) {
+        console.warn(`Error playing video ${id}:`, err);
+      }
+    }
+  }
+
+  pauseVideo(id: string): void {
+    const player = this.activeInstances.get(id);
+    if (player && typeof player.pauseVideo === 'function') {
+      try {
+        player.pauseVideo();
+      } catch (err) {
+        console.warn(`Error pausing video ${id}:`, err);
+      }
+    }
+  }
+
+  muteVideo(id: string): void {
+    const player = this.activeInstances.get(id);
+    if (player && typeof player.mute === 'function') {
+      try {
+        player.mute();
+      } catch (err) {
+        console.warn(`Error muting video ${id}:`, err);
+      }
+    }
+  }
+
+  unmuteVideo(id: string): boolean {
+    const player = this.activeInstances.get(id);
+    if (player && typeof player.unMute === 'function') {
+      try {
+        player.unMute();
+        return true;
+      } catch (err) {
+        console.warn(`Error unmuting video ${id}:`, err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  pauseAll(): void {
+    for (const [id, player] of this.activeInstances.entries()) {
+      if (player && typeof player.pauseVideo === 'function') {
+        try {
+          player.pauseVideo();
+        } catch (err) {
+          console.warn(`Error pausing player ${id} in pauseAll:`, err);
+        }
+      }
+    }
+  }
+
+  muteAll(): void {
+    for (const [id, player] of this.activeInstances.entries()) {
+      if (player && typeof player.mute === 'function') {
+        try {
+          player.mute();
+        } catch (err) {
+          console.warn(`Error muting player ${id} in muteAll:`, err);
+        }
+      }
+    }
+  }
+
+  unmuteAll(): { successCount: number; failedCount: number } {
+    let successCount = 0;
+    let failedCount = 0;
+    for (const [id, player] of this.activeInstances.entries()) {
+      if (player && typeof player.unMute === 'function') {
+        try {
+          player.unMute();
+          successCount++;
+        } catch (err) {
+          console.warn(`Error unmuting player ${id}:`, err);
+          failedCount++;
+        }
+      }
+    }
+    return { successCount, failedCount };
+  }
+
+  destroyAll(): void {
+    for (const [id, player] of this.activeInstances.entries()) {
+      if (player && typeof player.destroy === 'function') {
+        try {
+          player.destroy();
+        } catch (err) {
+          console.warn(`Error destroying player ${id}:`, err);
+        }
+      }
+    }
+    this.activeInstances.clear();
+  }
+
+  // --- URL PARSING & VALIDATION ---
+
   extractVideoId(input: string): string | null {
-    if (!input) return null;
+    if (!input || typeof input !== 'string') return null;
     const trimmed = input.trim();
-    if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+    if (!trimmed) return null;
+
+    // Reject inputs that start with protocol or domain but don't match YouTube
+    if (/^https?:\/\//i.test(trimmed)) {
+      if (!/(?:youtube\.com|youtu\.be)/i.test(trimmed)) {
+        return null;
+      }
+    }
+
+    // 1. YouTube Shorts: https://(www|m).youtube.com/shorts/VIDEO_ID
+    const shortsMatch = trimmed.match(/(?:youtube\.com\/shorts\/)([\w-]{11})/i);
+    if (shortsMatch) {
+      return shortsMatch[1];
+    }
+
+    // 2. Standard watch URL: youtube.com/watch?v=VIDEO_ID (supports m.youtube.com, query params before and after)
+    const watchMatch = trimmed.match(/(?:youtube\.com\/watch\?.*v=)([\w-]{11})/i);
+    if (watchMatch) {
+      return watchMatch[1];
+    }
+
+    // 3. Short URLs: youtu.be/VIDEO_ID
+    const youtuBeMatch = trimmed.match(/(?:youtu\.be\/)([\w-]{11})/i);
+    if (youtuBeMatch) {
+      return youtuBeMatch[1];
+    }
+
+    // 4. Embed URLs: youtube.com/embed/VIDEO_ID or youtube.com/v/VIDEO_ID
+    const embedMatch = trimmed.match(/(?:youtube\.com\/(?:embed|v)\/)([\w-]{11})/i);
+    if (embedMatch) {
+      return embedMatch[1];
+    }
+
+    // 5. Raw 11-character video ID directly (without any URL prefixes)
+    if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed) && !trimmed.includes('.') && !trimmed.includes('/')) {
       return trimmed;
     }
 
-    const match = trimmed.match(
-      /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/
-    );
-    return match ? match[1] : null;
+    return null;
   }
 }

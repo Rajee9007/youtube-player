@@ -49,6 +49,13 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/design-system/design-system.component').then((m) => m.DesignSystemComponent),
       },
+      {
+        path: 'multi-video-player',
+        loadComponent: () =>
+          import('./features/multi-video-player/multi-video-player.component').then(
+            (m) => m.MultiVideoPlayerComponent
+          ),
+      },
     ],
   },
 
