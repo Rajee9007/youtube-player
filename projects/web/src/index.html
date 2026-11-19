@@ -1,11 +1,32 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="midnight">
   <head>
     <meta charset="utf-8" />
-    <title>Web</title>
+    <title>Seyyul Video Hub — Premium Video Discovery Platform</title>
     <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Discover videos, channels, and curated playlists across the Seyyul YouTube network." />
+    <meta property="og:title" content="Seyyul Video Hub" />
+    <meta property="og:description" content="Discover videos, channels, and curated playlists across the Seyyul YouTube network." />
+    <meta property="og:type" content="website" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <link rel="preconnect" href="https://www.youtube.com" />
+    <link rel="preconnect" href="https://www.youtube-nocookie.com" />
+    <link rel="preconnect" href="https://i.ytimg.com" />
+
+    <!-- Instant theme initialization to eliminate initial flicker -->
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('syl_user_theme') || 'midnight';
+          var theme = saved;
+          if (saved === 'system') {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'midnight' : 'pure-light';
+          }
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <app-root></app-root>
