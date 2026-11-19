@@ -10,22 +10,13 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MultiPlayerItem, MultiPlayerStateService } from '../../../../core/services/multi-player-state.service';
-import { YouTubePlayerService } from '../../../../core/services/youtube-player.service';
+import { YouTubePlayerService, YTPlayerInstance } from '../../../../core/services/youtube-player.service';
 import {
   SylButtonComponent,
   SylBadgeComponent,
   SylCardComponent,
   SylTooltipDirective,
 } from '@seyyul/ui';
-
-export interface YTPlayerInstance {
-  playVideo(): void;
-  pauseVideo(): void;
-  mute(): void;
-  unMute(): void;
-  destroy?(): void;
-  getVideoData?(): { title?: string; author?: string; video_id?: string };
-}
 
 @Component({
   selector: 'app-multi-player-card',
@@ -361,8 +352,12 @@ export class MultiPlayerCardComponent implements OnDestroy {
 
       this.playerInstance = this.ytService.createPlayer(elementId, p.youtubeVideoId, {
         isMadeForKids: false,
-        onReady: (event: any) => {
-          this.ytService.registerPlayerInstance(p.id, this.playerInstance);
+        onReady: (event: { target?: YTPlayerInstance }) => {
+          const resolvedInstance = event?.target ?? this.playerInstance;
+          if (resolvedInstance) {
+            this.playerInstance = resolvedInstance;
+            this.ytService.registerPlayerInstance(p.id, resolvedInstance);
+          }
           this.stateService.updatePlayerStatus(p.id, 'ready');
 
           // Apply initial sound preference (Open with Muted option)
@@ -388,8 +383,9 @@ export class MultiPlayerCardComponent implements OnDestroy {
             this.ytService.playVideo(p.id);
           }
         },
-        onStateChange: (event: any) => {
-          const state = event.data;
+        onStateChange: (event: { data?: number }) => {
+          const state = event?.data;
+          if (state === undefined) return;
           // YT.PlayerState: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
           if (state === 1) {
             // PLAYING: Coordinate playback!
@@ -402,7 +398,7 @@ export class MultiPlayerCardComponent implements OnDestroy {
             this.stateService.updatePlayerStatus(p.id, 'ready');
           }
         },
-        onError: (err: any) => {
+        onError: (err: { data?: number }) => {
           this.playRequestedOnReady = false;
           const code = err?.data;
           let message = 'Unable to play video';

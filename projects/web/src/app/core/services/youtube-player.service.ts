@@ -8,6 +8,23 @@ declare global {
   }
 }
 
+export interface YTPlayerInstance {
+  playVideo(): void;
+  pauseVideo(): void;
+  mute(): void;
+  unMute(): void;
+  destroy?(): void;
+  getVideoData?(): { title?: string; author?: string; video_id?: string };
+  getPlayerState?(): number;
+}
+
+export interface YTPlayerOptions {
+  isMadeForKids?: boolean;
+  onReady?: (event: { target?: YTPlayerInstance }) => void;
+  onStateChange?: (event: { data?: number }) => void;
+  onError?: (event: { data?: number }) => void;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -18,7 +35,7 @@ export class YouTubePlayerService {
   private apiReadyPromise: Promise<void> | null = null;
 
   // Multi-player instances registry keyed by unique card ID
-  private readonly activeInstances = new Map<string, any>();
+  private readonly activeInstances = new Map<string, YTPlayerInstance>();
 
   loadIFrameApi(): Promise<void> {
     if (!this.isBrowser) {
@@ -65,13 +82,8 @@ export class YouTubePlayerService {
   createPlayer(
     elementId: string,
     videoId: string,
-    options: {
-      isMadeForKids?: boolean;
-      onReady?: (event: any) => void;
-      onStateChange?: (event: any) => void;
-      onError?: (event: any) => void;
-    }
-  ): any {
+    options: YTPlayerOptions
+  ): YTPlayerInstance | null {
     if (!this.isBrowser || !window.YT || !window.YT.Player) {
       return null;
     }
@@ -103,12 +115,12 @@ export class YouTubePlayerService {
 
   // --- MULTI-PLAYER INSTANCE REGISTRY ---
 
-  registerPlayerInstance(id: string, player: any): void {
+  registerPlayerInstance(id: string, player: YTPlayerInstance): void {
     if (!id || !player) return;
     this.activeInstances.set(id, player);
   }
 
-  getPlayerInstance(id: string): any {
+  getPlayerInstance(id: string): YTPlayerInstance | null {
     return this.activeInstances.get(id) ?? null;
   }
 

@@ -594,9 +594,13 @@ export class MultiVideoPlayerComponent implements OnInit {
   onAddVideo(): void {
     const trimmedUrl = this.urlInput.trim();
     if (!trimmedUrl) {
+      this.urlInput = '';
       this.errorMessage.set('Please enter a YouTube video URL or ID.');
       return;
     }
+
+    // Normalize input with trimmed URL
+    this.urlInput = trimmedUrl;
 
     const slotVal = this.state.validateSlotNumber(this.slotInput);
     if (!slotVal.valid || slotVal.slotNumber === undefined) {
