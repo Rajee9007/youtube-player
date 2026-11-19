@@ -9,11 +9,12 @@ export type PlayerPlaybackStatus =
   | 'playing'
   | 'paused'
   | 'ended'
-  | 'error';
+  | 'error'
+  | 'blocked';
 
 export interface MultiPlayerItem {
   id: string;
-  slotNumber: number;
+  slotNumber: number; // Sequential player number (Player 1, 2, ...)
   youtubeVideoId: string;
   originalUrl: string;
   title: string;
@@ -22,7 +23,16 @@ export interface MultiPlayerItem {
   status: PlayerPlaybackStatus;
   isMuted: boolean;
   initialMutePreference: boolean;
+  autoPlayOnInit?: boolean;
   errorMessage?: string;
+}
+
+export interface AddBatchResult {
+  success: boolean;
+  addedCount: number;
+  failedCount?: number;
+  error?: string;
+  players?: MultiPlayerItem[];
 }
 
 export interface AddPlayerResult {
@@ -35,6 +45,7 @@ export interface AddPlayerResult {
 }
 
 const STORAGE_KEY = 'syl_multi_video_players';
+export const MAX_BATCH_PLAYERS = 500;
 
 @Injectable({
   providedIn: 'root',
@@ -47,12 +58,11 @@ export class MultiPlayerStateService {
   readonly players = signal<MultiPlayerItem[]>([]);
 
   // Computed summary statistics (dynamically derived from players signal)
-  // Total Players reflects active registered player records, not loaded iframes
   readonly totalPlayers = computed<number>(() => this.players().length);
 
   readonly initializedPlayers = computed<number>(() =>
     this.players().filter(
-      (p) => p.status !== 'pending' && p.status !== 'loading' && p.status !== 'error'
+      (p) => p.status !== 'pending' && p.status !== 'loading' && p.status !== 'error' && p.status !== 'blocked'
     ).length
   );
 
@@ -69,7 +79,7 @@ export class MultiPlayerStateService {
   );
 
   readonly errorPlayers = computed<number>(() =>
-    this.players().filter((p) => p.status === 'error').length
+    this.players().filter((p) => p.status === 'error' || p.status === 'blocked').length
   );
 
   constructor() {
@@ -77,28 +87,45 @@ export class MultiPlayerStateService {
   }
 
   /**
-   * Validates a player slot number:
-   * Must be a positive whole integer >= 1 (no decimals, no 0, no negatives, no strings/empty).
+   * Validates number of players to add:
+   * Must be a positive integer >= 1 up to MAX_BATCH_PLAYERS (100).
    */
-  validateSlotNumber(slot: unknown): { valid: boolean; error?: string; slotNumber?: number } {
-    if (slot === null || slot === undefined || String(slot).trim() === '') {
-      return { valid: false, error: 'Player Number is required.' };
+  validatePlayerCount(count: unknown): { valid: boolean; error?: string; count?: number } {
+    if (count === null || count === undefined || String(count).trim() === '') {
+      return { valid: false, error: 'Number of players is required.' };
     }
 
-    const trimmed = String(slot).trim();
-    // Reject non-numeric or floating point strings
+    const trimmed = String(count).trim();
     if (!/^\d+$/.test(trimmed)) {
-      return { valid: false, error: 'Player Number must be a positive whole number (e.g. 1, 2, 5).' };
+      return { valid: false, error: 'Number of players must be a positive whole number (e.g. 1, 5, 10).' };
     }
 
     const num = Number(trimmed);
     if (!Number.isInteger(num) || num < 1) {
-      return { valid: false, error: 'Player Number must be at least 1 (positive integers only).' };
+      return { valid: false, error: 'Number of players must be at least 1.' };
     }
 
-    return { valid: true, slotNumber: num };
+    if (num > MAX_BATCH_PLAYERS) {
+      return {
+        valid: false,
+        error: `Maximum batch size is ${MAX_BATCH_PLAYERS} players per submission. Please enter a count between 1 and ${MAX_BATCH_PLAYERS}.`,
+      };
+    }
+
+    return { valid: true, count: num };
   }
 
+  /**
+   * Backwards-compatible validator for slot number.
+   */
+  validateSlotNumber(slot: unknown): { valid: boolean; error?: string; slotNumber?: number } {
+    const res = this.validatePlayerCount(slot);
+    return { valid: res.valid, error: res.error, slotNumber: res.count };
+  }
+
+  /**
+   * Returns true if any player with the given sequential player number exists.
+   */
   isSlotOccupied(slotNumber: number): boolean {
     return this.players().some((p) => p.slotNumber === slotNumber);
   }
@@ -108,109 +135,105 @@ export class MultiPlayerStateService {
   }
 
   /**
-   * Adds or replaces a YouTube video in a specific Player Slot number.
-   * - Immediately updates Total Players upon addition.
-   * - Does NOT increase Total Players if replacing an existing occupied slot.
-   * - Never auto-renumbers other slots.
+   * Append-Only Dynamic Multi Player Creation:
+   * - Appends `count` independent players for the given YouTube URL.
+   * - Never overwrites, replaces, or renumbers existing players.
+   * - Duplicate URLs are explicitly allowed; each gets a unique player instance.
+   * - Assigns sequential player numbers starting from max(existing) + 1.
+   * - Sets autoPlayOnInit: true so cards attempt muted autoplay immediately.
    */
-  addPlayer(
+  appendPlayers(
     rawUrl: string,
-    slotNumberInput: unknown,
-    openWithMuted: boolean = true,
-    forceReplace: boolean = false
-  ): AddPlayerResult {
+    countInput: unknown = 1,
+    openWithMuted: boolean = true
+  ): AddBatchResult {
     // 1. Validate URL
     if (!rawUrl || !String(rawUrl).trim()) {
-      return { success: false, error: 'Please enter a valid YouTube URL or Video ID.' };
+      return { success: false, addedCount: 0, error: 'Please enter a valid YouTube URL or Video ID.' };
     }
 
     const videoId = this.ytService.extractVideoId(String(rawUrl).trim());
     if (!videoId) {
       return {
         success: false,
+        addedCount: 0,
         error:
           'Invalid YouTube link. Please provide a standard URL (youtube.com/watch?v=...), short link (youtu.be/...), Shorts, or 11-char ID.',
       };
     }
 
-    // 2. Validate Slot Number
-    const slotValidation = this.validateSlotNumber(slotNumberInput);
-    if (!slotValidation.valid || slotValidation.slotNumber === undefined) {
-      return { success: false, error: slotValidation.error };
+    // 2. Validate Player Count
+    const countVal = this.validatePlayerCount(countInput);
+    if (!countVal.valid || countVal.count === undefined) {
+      return { success: false, addedCount: 0, error: countVal.error };
     }
-    const slotNumber = slotValidation.slotNumber;
+    const count = countVal.count;
 
-    // 3. Check for duplicate video ID across other slots
-    const duplicateInOtherSlot = this.players().find(
-      (p) => p.youtubeVideoId === videoId && p.slotNumber !== slotNumber
-    );
-    if (duplicateInOtherSlot) {
-      return {
-        success: false,
-        error: `Video with ID "${videoId}" is already assigned to Player #${duplicateInOtherSlot.slotNumber}.`,
-      };
-    }
+    // 3. Compute starting sequential player number (append-only)
+    const currentPlayers = this.players();
+    const startNumber =
+      currentPlayers.length === 0
+        ? 1
+        : Math.max(0, ...currentPlayers.map((p) => p.slotNumber)) + 1;
 
-    // 4. Check for occupied slot
-    const existingInSlot = this.getPlayerInSlot(slotNumber);
-    if (existingInSlot && !forceReplace) {
-      return {
-        success: false,
-        occupied: true,
-        existingPlayer: existingInSlot,
-        error: `Player ${slotNumber} is already occupied. Do you want to replace the existing video?`,
-      };
-    }
+    // 4. Generate unique player items (duplicate URLs allowed!)
+    const newItems: MultiPlayerItem[] = [];
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // 5. Handle Replacement
-    if (existingInSlot && forceReplace) {
-      // Safely destroy previous player instance
-      this.ytService.unregisterPlayerInstance(existingInSlot.id);
+    for (let i = 0; i < count; i++) {
+      const slotNumber = startNumber + i;
+      const id = `syl-player-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`;
 
-      const replacedPlayer: MultiPlayerItem = {
-        id: 'syl-player-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+      newItems.push({
+        id,
         slotNumber,
         youtubeVideoId: videoId,
         originalUrl: String(rawUrl).trim(),
         title: `YouTube Video (${videoId})`,
         thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        addedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        addedAt: timestamp,
         status: 'pending',
         isMuted: openWithMuted,
         initialMutePreference: openWithMuted,
-      };
-
-      // In-place replacement: Count remains unchanged
-      this.players.update((current) =>
-        current.map((p) => (p.slotNumber === slotNumber ? replacedPlayer : p))
-      );
-      this.persistToStorage();
-
-      return { success: true, player: replacedPlayer, replaced: true };
+        autoPlayOnInit: true,
+      });
     }
 
-    // 6. Handle New Slot Insertion (Sorted by slotNumber for display)
-    const newPlayer: MultiPlayerItem = {
-      id: 'syl-player-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-      slotNumber,
-      youtubeVideoId: videoId,
-      originalUrl: String(rawUrl).trim(),
-      title: `YouTube Video (${videoId})`,
-      thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-      addedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      status: 'pending',
-      isMuted: openWithMuted,
-      initialMutePreference: openWithMuted,
-    };
-
-    // Immediately increment Total Players and keep sorted by slotNumber
-    this.players.update((current) => {
-      const updated = [...current, newPlayer];
-      return updated.sort((a, b) => a.slotNumber - b.slotNumber);
-    });
+    // 5. Append atomically to state
+    this.players.update((current) => [...current, ...newItems]);
     this.persistToStorage();
 
-    return { success: true, player: newPlayer };
+    return {
+      success: true,
+      addedCount: count,
+      players: newItems,
+    };
+  }
+
+  /**
+   * Compatibility method: adds a player record or batch.
+   */
+  addPlayer(
+    rawUrl: string,
+    slotOrCountInput: unknown = 1,
+    openWithMuted: boolean = true,
+    _forceReplace: boolean = false
+  ): AddPlayerResult {
+    // Determine count: if slotOrCountInput is a valid positive integer, use it as count (or 1)
+    const countVal = this.validatePlayerCount(slotOrCountInput);
+    if (!countVal.valid) {
+      return { success: false, error: countVal.error };
+    }
+
+    const batchRes = this.appendPlayers(rawUrl, countVal.count, openWithMuted);
+    if (!batchRes.success) {
+      return { success: false, error: batchRes.error };
+    }
+
+    return {
+      success: true,
+      player: batchRes.players?.[0],
+    };
   }
 
   /**
@@ -223,6 +246,20 @@ export class MultiPlayerStateService {
     this.persistToStorage();
   }
 
+  /**
+   * Duplicate Player:
+   * Appends exactly one new independent player at the end of the grid
+   * inheriting the original video URL, muted autoplay, and loop configuration.
+   * Leaves the original source player completely undisturbed.
+   */
+  duplicatePlayer(originalPlayerId: string): MultiPlayerItem | null {
+    const original = this.players().find((p) => p.id === originalPlayerId);
+    if (!original) return null;
+    const url = original.originalUrl || `https://www.youtube.com/watch?v=${original.youtubeVideoId}`;
+    const res = this.appendPlayers(url, 1, true);
+    return res.players?.[0] ?? null;
+  }
+
   updatePlayerStatus(id: string, status: PlayerPlaybackStatus, errorMessage?: string): void {
     this.players.update((current) =>
       current.map((p) => {
@@ -230,7 +267,7 @@ export class MultiPlayerStateService {
           return {
             ...p,
             status,
-            errorMessage: errorMessage ?? (status === 'error' ? p.errorMessage : undefined),
+            errorMessage: errorMessage ?? (status === 'error' || status === 'blocked' ? p.errorMessage : undefined),
           };
         }
         return p;
@@ -253,28 +290,43 @@ export class MultiPlayerStateService {
     this.persistToStorage();
   }
 
-  // --- PLAYBACK COORDINATION ---
-  // Atomic signal update: Pauses other active videos when one begins playing
+  /**
+   * Simultaneous Multi-Playback:
+   * When a player starts playing, mark its status as 'playing'.
+   * DO NOT pause other players — all players run independently!
+   */
   onPlayerStartedPlaying(activeId: string): void {
-    const currentlyPlaying = this.players().filter(
-      (p) => p.id !== activeId && p.status === 'playing'
-    );
-
-    for (const other of currentlyPlaying) {
-      this.ytService.pauseVideo(other.id);
-    }
-
-    // Atomic update to avoid sequential multi-pass signal recomputations
-    this.players.update((current) =>
-      current.map((p) => {
-        if (p.id === activeId) return { ...p, status: 'playing' };
-        if (p.status === 'playing') return { ...p, status: 'paused' };
-        return p;
-      })
-    );
+    this.updatePlayerStatus(activeId, 'playing');
   }
 
   // --- GLOBAL ACTIONS ---
+
+  /**
+   * Play All:
+   * - Retrieves all existing player records and triggers playVideo() on every available YouTube instance.
+   * - Attempts playback for paused and ready players.
+   * - Attempts playback for pending or autoplay-blocked players when instances are available.
+   * - For pending players without an instance yet, enables autoPlayOnInit so they automatically
+   *   start playback as soon as their player instance becomes ready.
+   * - Preserves each player's independent playback state, sound preference, and loop configuration.
+   * - Does NOT create, duplicate, replace, or remove players.
+   */
+  playAll(): void {
+    for (const p of this.players()) {
+      const instance = this.ytService.getPlayerInstance(p.id);
+      if (instance && typeof instance.playVideo === 'function') {
+        try {
+          this.ytService.playVideo(p.id);
+        } catch (err) {
+          console.warn(`Error starting playback for player ${p.id} in playAll:`, err);
+        }
+      }
+    }
+
+    this.players.update((current) =>
+      current.map((p) => (p.status === 'pending' ? { ...p, autoPlayOnInit: true } : p))
+    );
+  }
 
   muteAll(): void {
     this.ytService.muteAll();
@@ -296,6 +348,12 @@ export class MultiPlayerStateService {
     );
   }
 
+  /**
+   * Clear All:
+   * Cleans up all YouTube iframe instances, resets state to empty,
+   * and clears LocalStorage.
+   * Sequential numbering for the next batch starts from 1.
+   */
   clearAll(): void {
     this.ytService.destroyAll();
     this.players.set([]);
@@ -308,14 +366,13 @@ export class MultiPlayerStateService {
     }
   }
 
-  // Next suggested empty slot for user convenience
+  /**
+   * Next sequential player number for the next submission.
+   */
   getNextAvailableSlot(): number {
-    const occupied = new Set(this.players().map((p) => p.slotNumber));
-    let slot = 1;
-    while (occupied.has(slot)) {
-      slot++;
-    }
-    return slot;
+    const current = this.players();
+    if (current.length === 0) return 1;
+    return Math.max(0, ...current.map((p) => p.slotNumber)) + 1;
   }
 
   // --- LOCALSTORAGE PERSISTENCE (SSR-SAFE) ---
@@ -349,10 +406,10 @@ export class MultiPlayerStateService {
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        // Recreate player cards in 'pending' state (no autoplay)
+        // Restored players mount in 'pending' state without autoPlayOnInit
+        // to prevent unwanted simultaneous playback upon browser page reload
         const restored: MultiPlayerItem[] = parsed.map((item, index) => ({
           id: item.id || 'syl-player-' + Math.random().toString(36).substring(2, 7),
-          // Migration support: fallback to sequential index + 1 if legacy record lacks slotNumber
           slotNumber: typeof item.slotNumber === 'number' && item.slotNumber >= 1 ? item.slotNumber : index + 1,
           youtubeVideoId: item.youtubeVideoId,
           originalUrl: item.originalUrl || `https://www.youtube.com/watch?v=${item.youtubeVideoId}`,
@@ -363,6 +420,7 @@ export class MultiPlayerStateService {
           status: 'pending',
           isMuted: item.isMuted ?? true,
           initialMutePreference: item.initialMutePreference ?? item.isMuted ?? true,
+          autoPlayOnInit: false,
         }));
 
         restored.sort((a, b) => a.slotNumber - b.slotNumber);

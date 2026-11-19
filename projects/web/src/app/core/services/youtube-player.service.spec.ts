@@ -110,6 +110,19 @@ describe('YouTubePlayerService', () => {
       expect(mockPlayer.unMute).toHaveBeenCalled();
     });
 
+    it('should call playVideo on all registered instances when playAll is invoked', () => {
+      const mockPlayerA = { playVideo: vi.fn() };
+      const mockPlayerB = { playVideo: vi.fn() };
+
+      service.registerPlayerInstance('card-a', mockPlayerA as any);
+      service.registerPlayerInstance('card-b', mockPlayerB as any);
+
+      service.playAll();
+
+      expect(mockPlayerA.playVideo).toHaveBeenCalled();
+      expect(mockPlayerB.playVideo).toHaveBeenCalled();
+    });
+
     it('should create strongly typed player instance when window.YT is ready', () => {
       const mockConstructorCalls: any[] = [];
       function MockYTPlayer(this: any, elementId: string, config: any) {

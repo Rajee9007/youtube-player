@@ -20,6 +20,7 @@ describe('MultiPlayerCardComponent', () => {
     status: 'pending',
     isMuted: true,
     initialMutePreference: true,
+    autoPlayOnInit: true,
   };
 
   let mockPlayerInstance: YTPlayerInstance;
@@ -47,7 +48,7 @@ describe('MultiPlayerCardComponent', () => {
       playVideo: vi.fn(),
       pauseVideo: vi.fn(),
       muteVideo: vi.fn(),
-      unMuteVideo: vi.fn(),
+      unmuteVideo: vi.fn(),
     };
 
     await TestBed.configureTestingModule({
@@ -64,6 +65,7 @@ describe('MultiPlayerCardComponent', () => {
     fixture = TestBed.createComponent(MultiPlayerCardComponent);
     component = fixture.componentInstance;
     fixture.componentRef.setInput('player', samplePlayer);
+    fixture.componentRef.setInput('index', 0);
     fixture.detectChanges();
   });
 
@@ -71,7 +73,18 @@ describe('MultiPlayerCardComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  describe('onReady resolution & event.target handling', () => {
+  describe('Automatic Muted Playback & onReady resolution', () => {
+    it('should automatically attempt muted playback on onReady', async () => {
+      await component.initializePlayer(true);
+      expect(capturedOptions?.onReady).toBeDefined();
+
+      capturedOptions.onReady!({ target: mockPlayerInstance });
+
+      expect(ytService.registerPlayerInstance).toHaveBeenCalledWith('test-card-1', mockPlayerInstance);
+      expect(mockPlayerInstance.mute).toHaveBeenCalled();
+      expect(ytService.playVideo).toHaveBeenCalledWith('test-card-1');
+    });
+
     it('should resolve player instance from event.target first when present', async () => {
       const targetInstance: YTPlayerInstance = {
         playVideo: vi.fn(),
@@ -81,9 +94,7 @@ describe('MultiPlayerCardComponent', () => {
         destroy: vi.fn(),
       };
 
-      await component.initializePlayer();
-      expect(capturedOptions?.onReady).toBeDefined();
-
+      await component.initializePlayer(true);
       capturedOptions.onReady!({ target: targetInstance });
 
       expect(ytService.registerPlayerInstance).toHaveBeenCalledWith('test-card-1', targetInstance);
@@ -91,39 +102,36 @@ describe('MultiPlayerCardComponent', () => {
     });
 
     it('should fallback to this.playerInstance when event.target is missing or undefined', async () => {
-      await component.initializePlayer();
-      expect(capturedOptions?.onReady).toBeDefined();
-
-      // Trigger with missing target
+      await component.initializePlayer(true);
       capturedOptions.onReady!({});
 
       expect(ytService.registerPlayerInstance).toHaveBeenCalledWith('test-card-1', mockPlayerInstance);
       expect(mockPlayerInstance.mute).toHaveBeenCalled();
     });
 
-    it('should apply sound preference when initial mute is false', async () => {
-      fixture.componentRef.setInput('player', { ...samplePlayer, isMuted: false });
-      fixture.detectChanges();
+    it('should transition to blocked state if autoplay check fails', async () => {
+      vi.useFakeTimers();
+      const spyUpdate = vi.spyOn(stateService, 'updatePlayerStatus');
+      (mockPlayerInstance as any).getPlayerState = vi.fn().mockReturnValue(2); // paused / blocked
 
-      await component.initializePlayer();
+      await component.initializePlayer(true);
       capturedOptions.onReady!({ target: mockPlayerInstance });
 
-      expect(mockPlayerInstance.unMute).toHaveBeenCalled();
-    });
+      // Advance timers by 3500ms
+      vi.advanceTimersByTime(3600);
 
-    it('should trigger deferred play action on onReady when playRequestedOnReady is true', async () => {
-      component.onPlay(); // Sets playRequestedOnReady = true before instance ready
-      await component.initializePlayer();
-
-      capturedOptions.onReady!({ target: mockPlayerInstance });
-
-      expect(ytService.playVideo).toHaveBeenCalledWith('test-card-1');
+      expect(spyUpdate).toHaveBeenCalledWith(
+        'test-card-1',
+        'blocked',
+        expect.stringContaining('Autoplay blocked')
+      );
+      vi.useRealTimers();
     });
   });
 
   describe('onStateChange & onError resilience with missing or malformed data', () => {
     beforeEach(async () => {
-      await component.initializePlayer();
+      await component.initializePlayer(true);
     });
 
     it('should update status on valid state change events', () => {
@@ -138,9 +146,9 @@ describe('MultiPlayerCardComponent', () => {
       capturedOptions.onStateChange!({ data: 2 });
       expect(spyUpdate).toHaveBeenCalledWith('test-card-1', 'paused');
 
-      // State 0: ended
+      // State 0: ended (triggers continuous loop restart)
       capturedOptions.onStateChange!({ data: 0 });
-      expect(spyUpdate).toHaveBeenCalledWith('test-card-1', 'ended');
+      expect(ytService.playVideo).toHaveBeenCalledWith('test-card-1');
 
       // State 5: cued/ready
       capturedOptions.onStateChange!({ data: 5 });
@@ -173,6 +181,32 @@ describe('MultiPlayerCardComponent', () => {
         capturedOptions.onError!({} as any);
       }).not.toThrow();
       expect(spyUpdate).toHaveBeenCalledWith('test-card-1', 'error', 'Unable to play video');
+    });
+  });
+
+  describe('UI Refinements: No Sequential Numbering & Duplicate Action', () => {
+    it('should not render any sequential player number element in the DOM', () => {
+      const numberEl = fixture.nativeElement.querySelector('.syl-player-number');
+      expect(numberEl).toBeNull();
+      expect(fixture.nativeElement.textContent).not.toContain('Player #1');
+    });
+
+    it('should render video ID badge and video title', () => {
+      const idEl = fixture.nativeElement.querySelector('.syl-card-video-id');
+      expect(idEl?.textContent).toContain('dQw4w9WgXcQ');
+
+      const titleEl = fixture.nativeElement.querySelector('.syl-card-video-title');
+      expect(titleEl?.textContent).toContain('Never Gonna Give You Up');
+    });
+
+    it('should emit duplicate event when duplicate button is clicked', () => {
+      let emittedId: string | undefined;
+      component.duplicate.subscribe((id) => {
+        emittedId = id;
+      });
+
+      component.onDuplicate();
+      expect(emittedId).toBe('test-card-1');
     });
   });
 });

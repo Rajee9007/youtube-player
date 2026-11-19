@@ -94,10 +94,15 @@ export class YouTubePlayerService {
       : 'https://www.youtube.com';
 
     return new window.YT.Player(elementId, {
+      width: '100%',
+      height: '100%',
       videoId,
       host,
       playerVars: {
-        autoplay: 0,             // Strictly NO autoplay per guidelines
+        autoplay: 1,             // Muted autoplay enabled
+        mute: 1,                 // Muted by default for autoplay compliance
+        loop: 1,                 // Continuous loop playback
+        playlist: videoId,       // Required by YouTube API for single-video continuous loop
         controls: 1,             // Native YouTube controls preserved
         rel: 0,                  // Do not show unrelated videos
         modestbranding: 1,       // Clean presentation preserving brand
@@ -181,6 +186,18 @@ export class YouTubePlayerService {
       }
     }
     return false;
+  }
+
+  playAll(): void {
+    for (const [id, player] of this.activeInstances.entries()) {
+      if (player && typeof player.playVideo === 'function') {
+        try {
+          player.playVideo();
+        } catch (err) {
+          console.warn(`Error playing player ${id} in playAll:`, err);
+        }
+      }
+    }
   }
 
   pauseAll(): void {

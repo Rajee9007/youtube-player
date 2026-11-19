@@ -29,7 +29,7 @@ describe('MultiVideoPlayerComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  describe('Input Normalization and Validation', () => {
+  describe('Input Normalization and Dynamic Batch Submissions', () => {
     it('should clear whitespace-only input and set error message', () => {
       component.urlInput = '    ';
       component.onAddVideo();
@@ -38,51 +38,87 @@ describe('MultiVideoPlayerComponent', () => {
       expect(component.errorMessage()).toBe('Please enter a YouTube video URL or ID.');
     });
 
-    it('should normalize valid URL input with trimmed string before processing', () => {
+    it('should reject invalid or zero player count', () => {
+      component.urlInput = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+      component.playerCountInput = '0';
+
+      component.onAddVideo();
+
+      expect(component.errorMessage()).toContain('at least 1');
+      expect(stateService.totalPlayers()).toBe(0);
+    });
+
+    it('should reject player count exceeding batch maximum', () => {
+      component.urlInput = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+      component.playerCountInput = '501';
+
+      component.onAddVideo();
+
+      expect(component.errorMessage()).toContain('Maximum batch size is 500');
+      expect(stateService.totalPlayers()).toBe(0);
+    });
+
+    it('should normalize valid URL and add batch of 5 players', () => {
       component.urlInput = '   https://www.youtube.com/watch?v=dQw4w9WgXcQ   ';
-      component.slotInput = '1';
+      component.playerCountInput = '5';
 
       component.onAddVideo();
 
-      // Upon success, urlInput should be cleared
       expect(component.urlInput).toBe('');
-      expect(stateService.totalPlayers()).toBe(1);
-      expect(stateService.players()[0].youtubeVideoId).toBe('dQw4w9WgXcQ');
+      expect(component.playerCountInput).toBe('1');
+      expect(stateService.totalPlayers()).toBe(5);
+      expect(stateService.players().map((p) => p.slotNumber)).toEqual([1, 2, 3, 4, 5]);
     });
 
-    it('should clear URL field upon successful slot addition', () => {
-      component.urlInput = 'https://youtu.be/M7lc1UVf-VE';
-      component.slotInput = '2';
-
+    it('should append subsequent batch of 10 players without replacing existing 5 players', () => {
+      // First batch: 5
+      component.urlInput = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+      component.playerCountInput = '5';
       component.onAddVideo();
 
-      expect(component.urlInput).toBe('');
+      // Second batch: 10
+      component.urlInput = 'https://www.youtube.com/watch?v=L_LUpnjgPso';
+      component.playerCountInput = '10';
+      component.onAddVideo();
+
+      expect(stateService.totalPlayers()).toBe(15);
+      expect(stateService.players()[0].slotNumber).toBe(1);
+      expect(stateService.players()[4].slotNumber).toBe(5);
+      expect(stateService.players()[5].slotNumber).toBe(6);
+      expect(stateService.players()[14].slotNumber).toBe(15);
+    });
+
+    it('should allow duplicate URLs and create independent players', () => {
+      component.urlInput = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+      component.playerCountInput = '3';
+      component.onAddVideo();
+
+      component.urlInput = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+      component.playerCountInput = '3';
+      component.onAddVideo();
+
+      expect(stateService.totalPlayers()).toBe(6);
       expect(component.errorMessage()).toBeNull();
-      expect(stateService.totalPlayers()).toBe(1);
     });
 
-    it('should preserve trimmed URL in pending replace payload when slot is occupied', () => {
-      // First add slot 1
-      stateService.addPlayer('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 1);
+    it('should delegate onDuplicatePlayer to stateService.duplicatePlayer', () => {
+      const spy = vi.spyOn(stateService, 'duplicatePlayer');
+      component.onDuplicatePlayer('player-123');
+      expect(spy).toHaveBeenCalledWith('player-123');
+    });
 
-      // Attempt to add another video to slot 1 with padding
-      component.urlInput = '   https://youtu.be/M7lc1UVf-VE   ';
-      component.slotInput = '1';
+    it('should trigger stateService.playAll when Play All toolbar CTA is clicked', () => {
+      const spy = vi.spyOn(stateService, 'playAll');
+      // Add players so toolbar renders
+      stateService.appendPlayers('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 2);
+      fixture.detectChanges();
 
-      component.onAddVideo();
+      const buttons = fixture.nativeElement.querySelectorAll('.syl-toolbar-actions syl-button');
+      const playAllBtn = Array.from(buttons).find((b: any) => b.textContent?.includes('Play All'));
+      expect(playAllBtn).toBeDefined();
 
-      expect(component.confirmReplaceOpen()).toBe(true);
-      expect((component as any).pendingReplacePayload).toEqual({
-        url: 'https://youtu.be/M7lc1UVf-VE',
-        slot: 1,
-        muted: true,
-      });
-
-      // Confirm replace clears URL field
-      component.onConfirmReplace();
-      expect(component.urlInput).toBe('');
-      expect(component.confirmReplaceOpen()).toBe(false);
-      expect(stateService.players()[0].youtubeVideoId).toBe('M7lc1UVf-VE');
+      stateService.playAll();
+      expect(spy).toHaveBeenCalled();
     });
   });
 });

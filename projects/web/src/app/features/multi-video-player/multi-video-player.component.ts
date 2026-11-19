@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -44,11 +44,11 @@ interface SampleVideo {
       <!-- Page Header -->
       <header class="syl-mvp-header">
         <div class="syl-mvp-header-badge">
-          <syl-badge variant="accent" [pill]="true">MULTI-PLAYER DASHBOARD</syl-badge>
+          <syl-badge variant="accent" [pill]="true">DYNAMIC MULTI-PLAYER DASHBOARD</syl-badge>
         </div>
         <h1 class="syl-mvp-title">Seyyul Multi Video Player</h1>
         <p class="syl-mvp-description">
-          Add, organize and manage multiple YouTube video players from one dashboard.
+          Add, organize and manage multiple YouTube video players from one dashboard with append-only dynamic scaling and automatic muted playback.
         </p>
       </header>
 
@@ -85,7 +85,7 @@ interface SampleVideo {
           title="Playing"
           [value]="state.playingPlayers()"
           [positive]="state.playingPlayers() > 0"
-          hint="Active coordinated audio"
+          hint="Active simultaneous streams"
         >
           <svg sylStatIcon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
             <circle cx="12" cy="12" r="10"></circle>
@@ -117,9 +117,9 @@ interface SampleVideo {
         </syl-stat-card>
 
         <syl-stat-card
-          title="Errors"
+          title="Errors / Blocked"
           [value]="state.errorPlayers()"
-          hint="Failed or restricted"
+          hint="Restricted or failed"
         >
           <svg sylStatIcon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
             <circle cx="12" cy="12" r="10"></circle>
@@ -130,11 +130,11 @@ interface SampleVideo {
       </section>
 
       <!-- Add Video Section -->
-      <section class="syl-mvp-add-section" aria-label="Add Video Player">
+      <section class="syl-mvp-add-section" aria-label="Add Video Players">
         <div class="syl-mvp-add-card">
-          <h2 class="syl-add-heading">Add YouTube Video</h2>
+          <h2 class="syl-add-heading">Add YouTube Players</h2>
           <p class="syl-add-sub">
-            Supports standard watch URLs, youtu.be shortlinks, Shorts, and 11-character video IDs.
+            Supports standard watch URLs, youtu.be shortlinks, Shorts, and 11-char IDs. Specify count to append independent players dynamically.
           </p>
 
           <div class="syl-add-form">
@@ -153,14 +153,15 @@ interface SampleVideo {
               </syl-input>
             </div>
 
-            <div class="syl-add-slot-wrapper">
+            <div class="syl-add-count-wrapper">
               <syl-input
-                placeholder="Player # (e.g. 1)"
+                placeholder="Count (e.g. 5)"
+                type="number"
                 [clearable]="false"
-                [(ngModel)]="slotInput"
+                [(ngModel)]="playerCountInput"
                 (keydown.enter)="onAddVideo()"
               >
-                <span sylPrefix class="syl-input-slot-icon">Slot #</span>
+                <span sylPrefix class="syl-input-count-icon">Count:</span>
               </syl-input>
             </div>
 
@@ -176,7 +177,7 @@ interface SampleVideo {
               [loading]="isAdding()"
               (clicked)="onAddVideo()"
             >
-              Add Video
+              Add Players
             </syl-button>
           </div>
 
@@ -217,11 +218,23 @@ interface SampleVideo {
               <strong>{{ state.totalPlayers() }}</strong> {{ state.totalPlayers() === 1 ? 'Player' : 'Players' }} Active
             </span>
             <span class="syl-toolbar-hint">
-              (Single-audio mode: starting one pauses others)
+              (Independent multi-playback with muted autoplay)
             </span>
           </div>
 
           <div class="syl-toolbar-actions">
+            <syl-button
+              variant="primary"
+              size="sm"
+              (clicked)="state.playAll()"
+              title="Play all initialized players"
+            >
+              <svg sylPrefix viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+              </svg>
+              Play All
+            </syl-button>
+
             <syl-button
               variant="outline"
               size="sm"
@@ -294,6 +307,7 @@ interface SampleVideo {
                 [player]="player"
                 [index]="idx"
                 (remove)="onRemovePlayer($event)"
+                (duplicate)="onDuplicatePlayer($event)"
               />
             }
           </div>
@@ -310,18 +324,6 @@ interface SampleVideo {
         [danger]="true"
         (confirm)="onConfirmClearAll()"
         (cancel)="confirmClearOpen.set(false)"
-      />
-
-      <!-- Occupied Slot Replace Confirmation Dialog -->
-      <syl-confirm-dialog
-        [open]="confirmReplaceOpen()"
-        title="Player Slot Occupied"
-        [message]="replaceConfirmMessage()"
-        confirmText="Replace Existing Video"
-        cancelText="Cancel"
-        [danger]="true"
-        (confirm)="onConfirmReplace()"
-        (cancel)="onCancelReplace()"
       />
     </div>
   `,
@@ -352,11 +354,11 @@ interface SampleVideo {
     }
 
     .syl-mvp-title {
-      font-size: 2.25rem;
+      font-size: 2rem;
       font-weight: 800;
-      letter-spacing: -0.025em;
       color: var(--syl-text-primary, #ffffff);
       margin: 0;
+      letter-spacing: -0.025em;
     }
 
     .syl-mvp-description {
@@ -364,9 +366,10 @@ interface SampleVideo {
       color: var(--syl-text-secondary, #a1a1aa);
       margin: 0;
       max-width: 48rem;
+      line-height: 1.5;
     }
 
-    /* Stats Grid */
+    /* Stats Grid: 2 col mobile, 3 col tablet, 6 col desktop */
     .syl-mvp-stats-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -385,7 +388,7 @@ interface SampleVideo {
       }
     }
 
-    /* Add Section */
+    /* Add Video Section */
     .syl-mvp-add-card {
       background-color: var(--syl-surface, #141417);
       border: 1px solid var(--syl-border, #27272a);
@@ -393,7 +396,8 @@ interface SampleVideo {
       padding: 1.5rem;
       display: flex;
       flex-direction: column;
-      gap: 1rem;
+      gap: 1.25rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
     }
 
     .syl-add-heading {
@@ -406,14 +410,13 @@ interface SampleVideo {
     .syl-add-sub {
       font-size: 0.875rem;
       color: var(--syl-text-secondary, #a1a1aa);
-      margin: 0;
+      margin: -0.5rem 0 0 0;
     }
 
     .syl-add-form {
       display: flex;
-      gap: 0.75rem;
-      align-items: stretch;
       flex-direction: column;
+      gap: 1rem;
     }
 
     @media (min-width: 768px) {
@@ -421,17 +424,23 @@ interface SampleVideo {
         flex-direction: row;
         align-items: center;
       }
+    }
 
-      .syl-add-input-wrapper {
-        flex: 2;
-      }
+    .syl-add-input-wrapper {
+      flex: 1;
+    }
 
-      .syl-add-slot-wrapper {
-        width: 12rem;
+    .syl-add-count-wrapper {
+      width: 100%;
+    }
+
+    @media (min-width: 768px) {
+      .syl-add-count-wrapper {
+        width: 10rem;
       }
     }
 
-    .syl-input-slot-icon {
+    .syl-input-count-icon {
       font-size: 0.8125rem;
       font-weight: 700;
       color: var(--syl-accent, #e50914);
@@ -473,30 +482,28 @@ interface SampleVideo {
       border-radius: var(--syl-radius-full, 9999px);
       cursor: pointer;
       font-size: 0.75rem;
-      font-family: inherit;
-      transition: all var(--syl-motion-base, 150ms) ease;
+      transition: all 0.15s ease;
     }
 
     .syl-sample-chip:hover {
-      background-color: var(--syl-surface-active, #2a2a30);
-      color: var(--syl-text-primary, #ffffff);
+      background-color: var(--syl-accent, #e50914);
+      color: #ffffff;
       border-color: var(--syl-accent, #e50914);
     }
 
     .syl-alert-wrapper {
-      margin-top: 0.5rem;
+      margin-top: 0.25rem;
     }
 
-    /* Global Toolbar */
+    /* Global Controls Toolbar */
     .syl-mvp-toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding: 0.875rem 1.25rem;
       background-color: var(--syl-surface, #141417);
       border: 1px solid var(--syl-border, #27272a);
       border-radius: var(--syl-radius-lg, 0.75rem);
-      padding: 0.875rem 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      align-items: flex-start;
       justify-content: space-between;
     }
 
@@ -566,19 +573,15 @@ interface SampleVideo {
     }
   `],
 })
-export class MultiVideoPlayerComponent implements OnInit {
+export class MultiVideoPlayerComponent {
   readonly state = inject(MultiPlayerStateService);
 
   urlInput = '';
-  slotInput = '1';
+  playerCountInput = '1';
   openWithMuted = true;
   readonly errorMessage = signal<string | null>(null);
   readonly isAdding = signal<boolean>(false);
   readonly confirmClearOpen = signal<boolean>(false);
-  readonly confirmReplaceOpen = signal<boolean>(false);
-  readonly replaceConfirmMessage = signal<string>('');
-
-  private pendingReplacePayload: { url: string; slot: number; muted: boolean } | null = null;
 
   readonly sampleVideos: SampleVideo[] = [
     { label: 'Seyyul Kids — Thirukkural Stories', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
@@ -586,10 +589,6 @@ export class MultiVideoPlayerComponent implements OnInit {
     { label: 'Seyyul Aanmeegam — Devotional', url: 'https://youtu.be/9bZkp7q19f0' },
     { label: 'Seyyul Toonz — Animation Short', url: 'https://www.youtube.com/shorts/kJQP7kiw5Fk' },
   ];
-
-  ngOnInit(): void {
-    this.slotInput = this.state.getNextAvailableSlot().toString();
-  }
 
   onAddVideo(): void {
     const trimmedUrl = this.urlInput.trim();
@@ -599,76 +598,43 @@ export class MultiVideoPlayerComponent implements OnInit {
       return;
     }
 
-    // Normalize input with trimmed URL
     this.urlInput = trimmedUrl;
 
-    const slotVal = this.state.validateSlotNumber(this.slotInput);
-    if (!slotVal.valid || slotVal.slotNumber === undefined) {
-      this.errorMessage.set(slotVal.error ?? 'Please enter a valid Player Number.');
+    const countVal = this.state.validatePlayerCount(this.playerCountInput);
+    if (!countVal.valid || countVal.count === undefined) {
+      this.errorMessage.set(countVal.error ?? 'Please enter a valid number of players.');
       return;
     }
 
     this.isAdding.set(true);
-    const result = this.state.addPlayer(trimmedUrl, slotVal.slotNumber, this.openWithMuted, false);
+    const result = this.state.appendPlayers(trimmedUrl, countVal.count, this.openWithMuted);
     this.isAdding.set(false);
 
-    if (result.occupied) {
-      this.pendingReplacePayload = {
-        url: trimmedUrl,
-        slot: slotVal.slotNumber,
-        muted: this.openWithMuted,
-      };
-      this.replaceConfirmMessage.set(
-        `Player ${slotVal.slotNumber} is already occupied. Do you want to replace the existing video?`
-      );
-      this.confirmReplaceOpen.set(true);
-      return;
-    }
-
     if (!result.success) {
-      this.errorMessage.set(result.error ?? 'Failed to add video player.');
+      this.errorMessage.set(result.error ?? 'Failed to add video players.');
     } else {
       this.urlInput = '';
-      this.slotInput = this.state.getNextAvailableSlot().toString();
+      this.playerCountInput = '1';
       this.errorMessage.set(null);
     }
-  }
-
-  onConfirmReplace(): void {
-    if (!this.pendingReplacePayload) return;
-    const { url, slot, muted } = this.pendingReplacePayload;
-    const result = this.state.addPlayer(url, slot, muted, true);
-    this.confirmReplaceOpen.set(false);
-    this.pendingReplacePayload = null;
-
-    if (!result.success) {
-      this.errorMessage.set(result.error ?? 'Failed to replace video player.');
-    } else {
-      this.urlInput = '';
-      this.slotInput = this.state.getNextAvailableSlot().toString();
-      this.errorMessage.set(null);
-    }
-  }
-
-  onCancelReplace(): void {
-    this.confirmReplaceOpen.set(false);
-    this.pendingReplacePayload = null;
   }
 
   onAddSample(url: string): void {
     this.urlInput = url;
-    this.slotInput = this.state.getNextAvailableSlot().toString();
+    this.playerCountInput = '1';
     this.onAddVideo();
   }
 
   onRemovePlayer(id: string): void {
     this.state.removePlayer(id);
-    this.slotInput = this.state.getNextAvailableSlot().toString();
+  }
+
+  onDuplicatePlayer(id: string): void {
+    this.state.duplicatePlayer(id);
   }
 
   onConfirmClearAll(): void {
     this.state.clearAll();
-    this.slotInput = '1';
     this.confirmClearOpen.set(false);
   }
 }
